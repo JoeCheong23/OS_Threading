@@ -2,8 +2,8 @@
     The Hybrid Merge Sort to use for Operating Systems Assignment 1 2021
     written by Robert Sheehan
 
-    Modified by: put your name here
-    UPI: put your login here
+    Modified by: Joe Cheong
+    UPI: jche545
 
     By submitting a program you are claiming that you and only you have made
     adjustments and additions to this code.
