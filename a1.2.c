@@ -108,9 +108,9 @@ void* merge_sort(void *data_block) {
             pthread_join(newThread, NULL);
             merge (&left_block, &right_block);
         } else {
-        merge_sort(&left_block);
-        merge_sort(&right_block);
-        merge(&left_block, &right_block);
+            merge_sort(&left_block);
+            merge_sort(&right_block);
+            merge(&left_block, &right_block);
         }
 
         
