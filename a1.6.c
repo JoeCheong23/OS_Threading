@@ -106,6 +106,10 @@ void* merge_sort(void *data_block) {
             pipe(merge_pipe);
 
             pid_t pid = fork();
+            if (pid < 0) {
+                perror("Error when forking.\n");
+                exit(EXIT_FAILURE);
+            }
 
             if (pid != 0) {
                 
