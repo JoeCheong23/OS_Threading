@@ -100,23 +100,20 @@ void* merge_sort(void *data_block) {
             make_new_process = false;
 
             pid_t pid = fork();
+            if (pid < 0) {
+                perror("Error when forking.\n");
+                exit(EXIT_FAILURE);
+            }
 
             if (pid != 0) {
                
                 merge_sort(&right_block);
                 wait(NULL);
-                for (int i = 0; i < left_block.size; i++){
-                    left_block.data[i] = block->data[i];
-                } 
                 merge(&left_block, &right_block);
                 
             } else {
 
                 merge_sort(&left_block);
-                block->size = left_block.size;
-                for (int i = 0; i < left_block.size; i++){
-                    block->data[i] = left_block.data[i];
-                }
                 exit(EXIT_SUCCESS);
             }
 
