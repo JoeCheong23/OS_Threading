@@ -151,7 +151,7 @@ void produce_random_data(struct block *block) {
 }
 
 int main(int argc, char *argv[]) {
-
+    
     long size;
 
 

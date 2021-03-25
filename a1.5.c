@@ -23,6 +23,8 @@
 #define SIZE    4
 #define MAX     1000
 #define SPLIT   16
+#define PIPE_BUFFER_INT_NUM 16384
+
 
 bool make_new_process = true;
 
@@ -107,18 +109,50 @@ void* merge_sort(void *data_block) {
                 exit(EXIT_FAILURE);
             }
 
+            int num_of_segments = 0;
+            if ((left_block.size % PIPE_BUFFER_INT_NUM) != 0) {
+                num_of_segments = (left_block.size / PIPE_BUFFER_INT_NUM) + 1;
+            } else {
+                num_of_segments = left_block.size / PIPE_BUFFER_INT_NUM;
+            }
+
             if (pid != 0) {
+
+
+                int *array_segment = calloc(1, sizeof(int)*PIPE_BUFFER_INT_NUM);
+
+
                 merge_sort(&right_block);
-                for (int i = 0; i < left_block.size; i++) {
-                    read(*read_merge, &left_block.data[i], sizeof(int));
+
+
+                for (int i = 0; i < num_of_segments; i++) {
+
+                    read(*read_merge, array_segment, sizeof(int)*PIPE_BUFFER_INT_NUM);
+                    for (int j = 0; j < PIPE_BUFFER_INT_NUM; j++) {
+                        left_block.data[(i*PIPE_BUFFER_INT_NUM) + j] = array_segment[j];
+                    }
+                    
                 }
+
                 merge(&left_block, &right_block);
+                free(array_segment);
                 
             } else {
+                
                 merge_sort(&left_block);
-                for (int i = 0; i < left_block.size; i++) {
-                    write(*write_merge, &left_block.data[i], sizeof(int));
+                int array_segment[PIPE_BUFFER_INT_NUM];
+                
+
+                for (int i = 0; i < num_of_segments; i++) {
+
+                    for (int j = 0; j < PIPE_BUFFER_INT_NUM; j++) {
+                        array_segment[j] = left_block.data[(i*PIPE_BUFFER_INT_NUM) + j];
+                    }
+                    write(*write_merge, array_segment, sizeof(int)*PIPE_BUFFER_INT_NUM);
                 }
+
+             
+
                 exit(EXIT_SUCCESS);
             }
 
@@ -152,6 +186,7 @@ void produce_random_data(struct block *block) {
 }
 
 int main(int argc, char *argv[]) {
+
 
     long size;
 
