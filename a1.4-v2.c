@@ -28,8 +28,6 @@
 
 int thread_num = 1;
 bool create_new_thread = true;
-pthread_mutex_t lock;
-pthread_cond_t wake_signal = PTHREAD_COND_INITIALIZER;
 struct threadpool threadpool;
 
 void* thread_function(void *arg);
@@ -42,17 +40,19 @@ typedef struct {
 typedef struct {
     void* (*function)(void *); //function to be executed
     void* argument; //argument for the function
-    sem_t job_completion_signal; //semaphore that the child thread will post to when it has completed it's task so the parent knows when to call merge.
+    sem_t *job_completion_signal; //semaphore that the child thread will post to when it has completed it's task so the parent knows when to call merge.
 } job;
 
 struct threadpool {
-    thread_structure thread_array[MAX_THREADS-1];
-    job queue[10];
+    pthread_t *thread_array;
+    job *queue[10];
     int available_threads; //number of threads that are currently waiting
     int head_pointer; //array position to pop jobs to execute.
     int tail_pointer; //array position to push new jobs to the queue.
     int queue_size;
     bool program_complete;
+    pthread_mutex_t lock;
+    pthread_cond_t wake_signal;
 
 };
 
@@ -68,15 +68,12 @@ struct split_pointer {
 
 void initialise_threadpool() {
 
+    threadpool.thread_array = (pthread_t *)malloc(sizeof(pthread_t[MAX_THREADS-1]));
 
     //initialise and add all threads into the thread_array.
     for (int i = 0; i < MAX_THREADS-1; i++) {
 
-        pthread_t thread;
-        thread_structure threadStructure;
-        pthread_create(&thread, NULL, thread_function, NULL); //create and initialise the thread
-        threadStructure.thread = thread;
-        threadpool.thread_array[i] = threadStructure;
+        pthread_create(&threadpool.thread_array[i], NULL, thread_function, NULL); //create and initialise the thread
 
     }
 
@@ -89,10 +86,13 @@ void initialise_threadpool() {
         job_instance.argument = NULL;
         sem_init(&job_semaphore, 1, 0); //initialise semaphore with value 0 so when parent calls sem_wait, it will block till threadpool thread completes the task.
 
-        job_instance.job_completion_signal = job_semaphore;
-        threadpool.queue[i] = job_instance;
+        job_instance.job_completion_signal = &job_semaphore;
+        threadpool.queue[i] = &job_instance;
     
     }
+
+    threadpool.lock = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+    threadpool.wake_signal = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
 
     threadpool.available_threads = 7;
     threadpool.head_pointer = 0;
@@ -109,34 +109,32 @@ void* thread_function(void *arg) {
 
     while (true) {
 
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&threadpool.lock);
 
         while ((threadpool.queue_size == 0) && (!threadpool.program_complete)) {
-            printf("Thread waiting");
-            pthread_cond_wait(&wake_signal, &lock);
-            printf("Signal received");
+            pthread_cond_wait(&threadpool.wake_signal, &threadpool.lock);
         }
 
         if (threadpool.program_complete) {
-            pthread_mutex_unlock(&lock);
+            pthread_mutex_unlock(&threadpool.lock);
             break;
         }
 
         head_pointer = threadpool.head_pointer; //retrieve the array location of the first job in the queue.
         threadpool.head_pointer = (threadpool.head_pointer + 1) % 10; //increment the pointer to the next position in the array.
-        current_job = threadpool.queue[head_pointer]; //retrieve the first job in the queue to be executed.
+        current_job = *threadpool.queue[head_pointer]; //retrieve the first job in the queue to be executed.
         threadpool.queue_size--; //reduce the size of the queue as one of the jobs has been removed.
         threadpool.available_threads--;
 
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&threadpool.lock);
 
         (*(current_job.function))(current_job.argument);
 
-        sem_post(&current_job.job_completion_signal);
+        sem_post(current_job.job_completion_signal);
 
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&threadpool.lock);
         threadpool.available_threads++; //job complete so the thread is available again.
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&threadpool.lock);
 
     }
 
@@ -191,6 +189,7 @@ void merge(struct block *left, struct block *right) {
 void* merge_sort(void *data_block) {
 
     struct block *block = (struct block*)data_block;
+    pthread_mutex_lock(&threadpool.lock);
 
     if ((block->size > SPLIT)) {
         struct block left_block;
@@ -200,40 +199,44 @@ void* merge_sort(void *data_block) {
         right_block.size = block->size - left_block.size; // left_block.size + (block->size % 2);
         right_block.data = block->data + left_block.size;
 
-        pthread_mutex_lock(&lock);
+        
 
         if ((threadpool.available_threads > 0) && (threadpool.queue_size < 10)) {
             
-            sem_t current_job_semaphore;
+            sem_t *current_job_semaphore;
+            job current_job;
 
             int tail_pointer = threadpool.tail_pointer; //get position in job queue to add job to.
             threadpool.tail_pointer = (threadpool.tail_pointer + 1) % 10; //move pointer to next position for next time a job is to be added.
             threadpool.queue_size++; //increment the queue size as a job is going to be added to the queue.
 
-            threadpool.queue[tail_pointer].function = merge_sort;
-            threadpool.queue[tail_pointer].argument = &left_block;
-            current_job_semaphore = threadpool.queue[tail_pointer].job_completion_signal;
+            current_job.function = merge_sort;
+            current_job.argument = &left_block;
+            current_job_semaphore = threadpool.queue[tail_pointer]->job_completion_signal;
+
+            threadpool.queue[tail_pointer] = &current_job;
             
-            pthread_mutex_unlock(&lock);
+            pthread_mutex_unlock(&threadpool.lock);
             
-            pthread_cond_broadcast(&wake_signal);
+            pthread_cond_signal(&threadpool.wake_signal);
             
             merge_sort(&right_block);
 
-            sem_wait(&current_job_semaphore);
+            sem_wait(current_job_semaphore);
 
             merge(&left_block, &right_block);
 
 
         } else {
             
-            pthread_mutex_unlock(&lock);
+            pthread_mutex_unlock(&threadpool.lock);
             merge_sort(&left_block);
             merge_sort(&right_block);
             merge(&left_block, &right_block);
 
         }
     } else {
+        pthread_mutex_unlock(&threadpool.lock);
         insertion_sort(block);
     }
 }
@@ -284,8 +287,8 @@ int main(int argc, char *argv[]) {
     times(&start_times);
 
     merge_sort(&block);
-
     threadpool.program_complete = true;
+   
 
     gettimeofday(&finish_wall_time, NULL);
     times(&finish_times);
@@ -294,11 +297,11 @@ int main(int argc, char *argv[]) {
     printf("finish time in clock ticks: %ld\n", finish_times.tms_utime);
     printf("wall time %ld secs and %ld microseconds\n", wall_time.tv_sec, wall_time.tv_usec);
 
+
     if (block.size < 1025)
         print_data(&block);
 
     printf(is_sorted(&block) ? "sorted\n" : "not sorted\n");
-    printf("Number of threads created: %d\n", thread_num);
     free(block.data);
     exit(EXIT_SUCCESS);
 }
